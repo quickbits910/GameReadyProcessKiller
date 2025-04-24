@@ -10,6 +10,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		README.md = README.md
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameReadyProcessKillerTests", "GameReadyProcessKillerTests\GameReadyProcessKillerTests.csproj", "{33C8B0E7-1D4D-4E11-AA19-3301064DF4AD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,6 +22,10 @@ Global
 		{1019558F-1B6A-409E-A868-C8560AF5AA88}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1019558F-1B6A-409E-A868-C8560AF5AA88}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1019558F-1B6A-409E-A868-C8560AF5AA88}.Release|Any CPU.Build.0 = Release|Any CPU
+		{33C8B0E7-1D4D-4E11-AA19-3301064DF4AD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{33C8B0E7-1D4D-4E11-AA19-3301064DF4AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{33C8B0E7-1D4D-4E11-AA19-3301064DF4AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{33C8B0E7-1D4D-4E11-AA19-3301064DF4AD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

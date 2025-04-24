@@ -1,67 +1,81 @@
 ﻿using System;
-using System.Collections.Specialized;
 using System.Configuration;
 using System.Diagnostics;
-using System.Linq;
 using System.Management;
 using System.Xml;
 
 namespace GameReadyProcessKiller
 {
-
-    public class ProcessHelper
+    public partial class ProcessHelper
     {
-
         public string GetProcessOwner(int processId)
         {
-            string query = "Select * From Win32_Process Where ProcessID = " + processId;
-            ManagementObjectSearcher searcher = new ManagementObjectSearcher(query);
-            ManagementObjectCollection processList = searcher.Get();
-
-            foreach (ManagementObject obj in processList)
+            try
             {
-                string[] argList = new string[] { string.Empty, string.Empty };
-                int returnVal = Convert.ToInt32(obj.InvokeMethod("GetOwner", argList));
-                if (returnVal == 0)
+                string query = $"Select * From Win32_Process Where ProcessID = {processId}";
+                using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(query))
                 {
-                    return argList[1] + "\\" + argList[0];   // return DOMAIN\user
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        string[] ownerInfo = new string[2];
+                        int ret = Convert.ToInt32(obj.InvokeMethod("GetOwner", ownerInfo));
+                        if (ret == 0)
+                        {
+                            return $"{ownerInfo[1]}\\{ownerInfo[0]}"; // DOMAIN\user
+                        }
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                // Log or handle error retrieving owner
+                Console.WriteLine($"Failed to get owner for PID {processId}: {ex.Message}");
             }
             return "NO OWNER";
         }
 
-        /// <summary>
-        /// Kill processes if they meet the parameter values of process name, owner name, expired started times.
-        /// </summary>
-        /// <param name="ProcessName">Process Name, case sensitive, for emample "EXCEL" could not be "excel"</param>
-        /// <param name="ProcessUserName">Owner name or user name of the process, case sensitive</param>
-        /// <param name="HasStartedForHours">if process has started for more than n (parameter input) hours. 0 means regardless how many hours ago</param>
-        public void KillProcessByNameAndUser(string ProcessName, string ProcessUserName, int HasStartedForHours)
+        public void KillProcessByNameAndUser(string processName, string processUserName, int startedForHours = 0)
         {
-            Process[] foundProcesses = Process.GetProcessesByName(ProcessName);
-            Console.WriteLine(foundProcesses.Length.ToString() + " processes found.");
-            string strMessage = string.Empty;
-            foreach (Process p in foundProcesses)
+            if (string.IsNullOrWhiteSpace(processName))
             {
-                try 
-                { 
-                string UserName = GetProcessOwner(p.Id);
-                strMessage = string.Format("Process Name: {0} | Process ID: {1} | User Name : {2} | StartTime {3}",
-                                                 p.ProcessName, p.Id.ToString(), UserName, p.StartTime.ToString());
-                //Console.WriteLine(strMessage);
-                bool TimeExpired = (p.StartTime.AddHours(HasStartedForHours) < DateTime.Now) || HasStartedForHours == 0;
-                bool PrcoessUserName_Is_Matched = UserName.Equals(ProcessUserName);
+                Console.WriteLine("Process name is empty or invalid.");
+                return;
+            }
 
-                if ((ProcessUserName.ToLower() == "all" && TimeExpired) ||
-                     PrcoessUserName_Is_Matched && TimeExpired)
+            var foundProcesses = Process.GetProcessesByName(processName);
+            if (foundProcesses.Length == 0)
+            {
+                Console.WriteLine($"No processes found with name '{processName}'.");
+                return;
+            }
+
+            Console.WriteLine($"{foundProcesses.Length} processes found with name '{processName}'.");
+
+            foreach (var process in foundProcesses)
+            {
+                try
                 {
-                    p.Kill();
-                    Console.WriteLine("Process ID " + p.Id.ToString() + " is killed.");
+                    string owner = GetProcessOwner(process.Id);
+                    bool userMatch = processUserName.Equals("all", StringComparison.OrdinalIgnoreCase) ||
+                                     owner.Equals(processUserName, StringComparison.OrdinalIgnoreCase);
+
+                    bool timeExpired = startedForHours == 0 || (DateTime.Now - process.StartTime).TotalHours >= startedForHours;
+
+                    Console.WriteLine($"Process: {process.ProcessName} | PID: {process.Id} | Owner: {owner} | Start Time: {process.StartTime}");
+
+                    if (userMatch && timeExpired)
+                    {
+                        process.Kill();
+                        Console.WriteLine($"Process {process.Id} killed.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Process {process.Id} not killed due to filtering criteria.");
+                    }
                 }
-                }
-                catch (Exception ex) 
+                catch (Exception ex)
                 {
-                    Console.WriteLine(ex.Message.ToString());
+                    Console.WriteLine($"Error processing PID {process.Id}: {ex.Message}");
                 }
             }
         }
@@ -69,33 +83,59 @@ namespace GameReadyProcessKiller
 
     class Program
     {
-        static void Main(string[] args)
+        static void Main()
         {
             Console.WriteLine("Killing processes loaded from app.config");
 
-            var map = new ExeConfigurationFileMap
+            try
             {
-                ExeConfigFilename = @"App.config"
-            };
-            var configuration = ConfigurationManager.OpenMappedExeConfiguration(map, ConfigurationUserLevel.None);
-            
-            var myParamsSection = configuration.GetSection("GameProcessPurge");
+                var config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+                var section = config.GetSection("GameProcessPurge");
 
-            var rawXml = myParamsSection.SectionInformation.GetRawXml();
- 
-            var xmlDocument = new XmlDocument();
-            xmlDocument.LoadXml(rawXml);
-            XmlNodeList elemList = xmlDocument.GetElementsByTagName("Settings");
+                if (section == null)
+                {
+                    Console.WriteLine("Config section 'GameProcessPurge' not found.");
+                    return;
+                }
 
-            for (int i = 0; i < elemList.Count; i++)
+                var xmlDoc = new XmlDocument();
+                xmlDoc.LoadXml(section.SectionInformation.GetRawXml());
+
+                var settingsList = xmlDoc.GetElementsByTagName("Settings");
+                if (settingsList.Count == 0)
+                {
+                    Console.WriteLine("No process settings found in configuration.");
+                    return;
+                }
+
+                var processHelper = new GameReadyProcessKiller.ProcessHelper(new SystemProcessProvider());
+
+                foreach (XmlNode node in settingsList)
+                {
+                    var processName = node.Attributes?["processname"]?.Value;
+                    var autoKillUser = node.Attributes?["autokilluser"]?.Value ?? "all";
+
+                    if (string.IsNullOrWhiteSpace(processName))
+                    {
+                        Console.WriteLine("Process name attribute missing or empty in configuration.");
+                        continue;
+                    }
+
+                    Console.WriteLine($"Processing process '{processName}', auto kill user '{autoKillUser}'.");
+
+                    processHelper.KillProcessByNameAndUser(processName, autoKillUser);
+                }
+            }
+            catch (ConfigurationErrorsException ex)
             {
-                string attrVal = elemList[i].Attributes["processname"].Value;
-                string attrValOwner = elemList[i].Attributes["autokilluser"].Value;
-                Console.WriteLine(attrVal);
-                var ph = new ProcessHelper();
-                ph.KillProcessByNameAndUser(attrVal, attrValOwner, 0);
+                Console.WriteLine($"Error reading configuration: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Unexpected error: {ex.Message}");
             }
 
+            Console.WriteLine("Press ENTER to exit.");
             Console.ReadLine();
         }
     }
